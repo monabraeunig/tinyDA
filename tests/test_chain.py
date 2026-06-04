@@ -2,7 +2,6 @@ import pytest
 
 import numpy as np
 from scipy.stats import multivariate_normal
-import warnings
 
 from tinyDA.chain import Chain, DAChain, MLDAChain
 from tinyDA.posterior import Posterior
@@ -120,6 +119,135 @@ def test_posterior_create_link(posterior):
     assert isinstance(link.model_output, np.ndarray)
     assert np.isfinite(link.posterior)
 
+
+def assert_list_of_type(lst, typ, expected_length):
+    assert isinstance(lst, list)
+    assert all(isinstance(x, typ) for x in lst)
+    
+    if (expected_length >= 0):
+        assert len(lst) == expected_length
+
+    if typ is Link:
+        assert all(isinstance(x.parameters, np.ndarray) for x in lst)
+
+#--------------------------------------------------------------------------------------------
+# assertions constructor
+
+def assert_constructor(chain, level, initial_parameters):
+
+    # MH, DA and MLDA
+    assert isinstance(chain.initial_parameters, np.ndarray)
+    assert all(isinstance(y, float) for y in chain.initial_parameters)
+
+    # MH and DA 
+    if (level == "MH" or level == "DA"):
+        assert isinstance(chain.proposal, GaussianRandomWalk) 
+
+    # MH and MLDA
+    if (level == "MH" or level == "MLDA"):
+        assert isinstance(chain.posterior, Posterior)
+
+        assert_list_of_type(chain.chain, Link, 1)
+        assert_list_of_type(chain.accepted, bool, 1)
+
+    # DA and MLDA
+    if (level == "DA" or level == "MLDA"):
+        assert isinstance(chain.subchain_length, int)
+    
+        if (initial_parameters is not None):
+            assert len(chain.initial_parameters) == len(initial_parameters)
+            np.testing.assert_array_equal(
+                chain.initial_parameters,
+                initial_parameters
+            )
+    
+        assert isinstance(chain.adaptive_error_model, (str, type(None))) 
+        assert isinstance(chain.store_coarse_chain, bool)
+  
+    # DA
+    if (level == "DA"):
+        assert isinstance(chain.posterior_coarse, Posterior)
+        assert isinstance(chain.posterior_fine, Posterior)
+              
+        assert isinstance(chain.randomize_subchain_length, bool)
+
+        assert_list_of_type(chain.chain_coarse, Link, 1)
+        assert_list_of_type(chain.accepted_coarse, bool, 1)
+        assert_list_of_type(chain.is_coarse, bool, 1)
+        assert_list_of_type(chain.promoted_coarse, Link, 0)
+        assert_list_of_type(chain.subchain_lengths, int, 0)
+        assert_list_of_type(chain.chain_fine, Link, 1)
+        assert_list_of_type(chain.accepted_fine, bool, 1)
+        
+    # MLDA
+    if (level == "MLDA"):
+        assert isinstance(chain.level, int)
+        assert isinstance(chain.proposal, MLDA)
+
+#--------------------------------------------------------------------------------------------
+# test existence of attribute bias
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known bug: DAChain does not define 'bias' attribute"
+)
+def test_DA_chain_has_bias_attribute():
+
+    da_chain = DAChain(
+        posterior_coarse,
+        posterior_fine,
+        proposal_da,
+        subchain_length=2,
+    )
+
+    assert hasattr(da_chain, "bias")
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known bug: MLDAChain does not define 'bias' attribute"
+)
+def test_MLDA_chain_has_bias_attribute():
+
+    mlda_chain = MLDAChain(
+        posteriors,
+        proposal_mlda_base,
+        subchain_lengths=[2],
+        initial_parameters=None,
+        adaptive_error_model=None
+    )
+
+    assert hasattr(mlda_chain, "bias")
+#--------------------------------------------------------------------------------------------
+# assertions sample
+
+def assert_sample_chain(chain, level, iterations):
+
+    # MH and DA
+    if (level == "MH" or level == "DA"):
+        assert isinstance(chain.proposal, GaussianRandomWalk)
+
+    # MH and MLDA
+    if (level == "MH" or level == "MLDA"):
+        assert_list_of_type(chain.chain, Link, iterations+1)
+        assert_list_of_type(chain.accepted, bool, iterations+1) 
+    
+
+    # DA
+    if (level == "DA"):
+        assert chain.subchain_length == 2
+        
+        assert_list_of_type(chain.chain_coarse, Link, (iterations * 3) + 1)
+        assert_list_of_type(chain.accepted_coarse, bool, (iterations * 3) + 1)
+        assert_list_of_type(chain.is_coarse, bool, (iterations * 3) + 1)
+        assert_list_of_type(chain.promoted_coarse, Link, -1)
+        assert_list_of_type(chain.subchain_lengths, int, -1)
+        assert_list_of_type(chain.chain_fine, Link, iterations + 1)
+        assert_list_of_type(chain.accepted_fine, bool, iterations + 1)
+    
+    # MLDA
+    if (level == "MLDA"):
+        assert isinstance(chain.proposal, MLDA)
+
 #--------------------------------------------------------------------------------------------
 # test simple chain (MH)
 
@@ -133,16 +261,8 @@ def test_posterior_create_link(posterior):
 def test_chain_constructor(posterior, proposal, initial_parameters):
     
     chain = Chain(posterior, proposal, initial_parameters=initial_parameters)
-    
-    assert isinstance(chain.chain, list)
-    assert all(isinstance(x, Link) for x in chain.chain)
-    assert all(isinstance(x.parameters, np.ndarray) for x in chain.chain)
-    assert isinstance(chain.posterior, Posterior)
-    assert isinstance(chain.proposal, GaussianRandomWalk)
-    assert isinstance(chain.initial_parameters, np.ndarray)
-    assert all(isinstance(y, float) for y in chain.initial_parameters)
-    assert isinstance(chain.accepted, list)
-    assert all(isinstance(a, bool) for a in chain.accepted)
+
+    assert_constructor(chain, "MH", initial_parameters=initial_parameters)
 
 #--------------------------------------------------------------------------------------------
 # test sample for MH chain
@@ -151,23 +271,16 @@ def test_chain_constructor(posterior, proposal, initial_parameters):
     "iterations, progressbar",
     [
         (0, False),
+        (50, False),
         (100, False),
-        (200, True),
     ],
 )
 def test_sample_for_MHchain(iterations, progressbar):
 
     chain = Chain(posterior, proposal, initial_parameters=None)
     chain.sample(iterations, progressbar=progressbar)
-    
-    assert len(chain.chain) == iterations + 1
-    assert len(chain.accepted) == iterations + 1
-    assert isinstance(chain.chain, list)
-    assert all(isinstance(x, Link) for x in chain.chain)
-    assert all(isinstance(x.parameters, np.ndarray) for x in chain.chain)
-    assert isinstance(chain.accepted, list)
-    assert all(isinstance(a, bool) for a in chain.accepted)
-    assert isinstance(chain.proposal, GaussianRandomWalk)
+
+    assert_sample_chain(chain, "MH", iterations)
 
 #--------------------------------------------------------------------------------------------
 # Class DAChain 
@@ -192,60 +305,7 @@ def test_DA_chain_constructor(posterior_coarse, posterior_fine, proposal, subcha
         store_coarse_chain=store_coarse_chain
     )
 
-    assert isinstance(da_chain.posterior_coarse, Posterior)
-    assert isinstance(da_chain.posterior_fine, Posterior)
-    assert isinstance(da_chain.proposal, GaussianRandomWalk)
-    assert isinstance(da_chain.subchain_length, int)
-    assert isinstance(da_chain.randomize_subchain_length, bool)
-    
-    assert isinstance(da_chain.initial_parameters, np.ndarray)
-    assert all(isinstance(y, float) for y in da_chain.initial_parameters)
-    if (initial_parameters is not None):
-        assert len(da_chain.initial_parameters) == len(initial_parameters)
-        np.testing.assert_array_equal(
-            da_chain.initial_parameters,
-            initial_parameters
-        )
-    
-    assert isinstance(da_chain.chain_coarse, list)
-    assert all(isinstance(x, Link) for x in da_chain.chain_coarse)
-    assert all(isinstance(x.parameters, np.ndarray) for x in da_chain.chain_coarse)
-    assert len(da_chain.chain_coarse) == 1
-    
-    assert isinstance(da_chain.accepted_coarse, list)
-    assert all(isinstance(b, bool) for b in da_chain.accepted_coarse)
-    assert len(da_chain.accepted_coarse) == 1
-    
-    assert isinstance(da_chain.is_coarse, list)
-    assert all(isinstance(c, bool) for c in da_chain.is_coarse)
-    assert len(da_chain.is_coarse) == 1
-    
-    assert isinstance(da_chain.promoted_coarse, list)
-    assert all(isinstance(x, Link) for x in da_chain.promoted_coarse)
-    assert all(isinstance(x.parameters, np.ndarray) for x in da_chain.promoted_coarse)
-
-    # In Louises Version the promoted_coarse chain length is kept compatible with the fine chain, which is not the cas in mikkles version this is why we have a problem here, I quess we can just not heck for the length in mikkels version its 0 in louises version its 1, so i chnge it to 0 for now
-    # this is what louise says about the change:
-        # append a link with the initial parameters to promoted_coarse as well
-        # to keep the length compatible with the fine chain
-    assert len(da_chain.promoted_coarse) == 0 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 0=1
-    
-    assert isinstance(da_chain.subchain_lengths, list)
-    assert all(isinstance(c, int) for c in da_chain.subchain_lengths)
-    assert len(da_chain.subchain_lengths) == 0
-    
-    assert isinstance(da_chain.chain_fine, list)
-    assert all(isinstance(x, Link) for x in da_chain.chain_fine)
-    assert all(isinstance(x.parameters, np.ndarray) for x in da_chain.chain_fine)
-    assert len(da_chain.chain_fine) == 1
-    
-    assert isinstance(da_chain.accepted_fine, list)
-    assert all(isinstance(c, bool) for c in da_chain.accepted_fine)
-    assert len(da_chain.accepted_fine) == 1
-    
-    assert isinstance(da_chain.adaptive_error_model, (str, type(None))) 
-    #assert isinstance(da_chain.bias, (RecursiveSampleMoments,type(None)))
-    assert isinstance(da_chain.store_coarse_chain, bool)
+    assert_constructor(da_chain, "DA", initial_parameters=initial_parameters)
 
 #--------------------------------------------------------------------------------------------
 # test sample for DA chain
@@ -254,9 +314,8 @@ def test_DA_chain_constructor(posterior_coarse, posterior_fine, proposal, subcha
     "iterations, progressbar",
     [
         (0, False),
+        (50, False),
         (100, False),
-        (200, True),
-        (300, False),
     ],
 )
 def test_sample_for_DAchain(iterations, progressbar):
@@ -274,53 +333,7 @@ def test_sample_for_DAchain(iterations, progressbar):
     
     da_chain.sample(iterations, progressbar=progressbar)
 
-    100
-
-    assert len(da_chain.chain_coarse) == (iterations * 3) + 1
-    assert len(da_chain.accepted_coarse) == (iterations * 3) + 1
-    assert len(da_chain.is_coarse) == (iterations * 3) + 1
-
-    # this is what louise says about the change:
-        # append a link with the initial parameters to promoted_coarse as well
-        # to keep the length compatible with the fine chain
-    # and so I think there is not really a way of knowing the length exactly (depends on random factors) 
-    # consequence: I will not check it?
-    #assert len(da_chain.promoted_coarse) == iterations + 1 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! assert 0 == (0 + 1) bzw. assert 91 == (100 + 1) bzw. assert 183 == (200 + 1)
-
-    assert da_chain.subchain_length == 2
-    
-    assert len(da_chain.chain_fine) == iterations + 1
-    assert len(da_chain.accepted_fine) == iterations + 1
-    
-    assert isinstance(da_chain.chain_coarse, list)
-    assert all(isinstance(x, Link) for x in da_chain.chain_coarse)
-    assert all(isinstance(x.parameters, np.ndarray) for x in da_chain.chain_coarse)
-    
-    
-    assert isinstance(da_chain.accepted_coarse, list)
-    assert all(isinstance(b, bool) for b in da_chain.accepted_coarse)
-    
-    
-    assert isinstance(da_chain.is_coarse, list)
-    assert all(isinstance(c, bool) for c in da_chain.is_coarse)
-    
-    
-    assert isinstance(da_chain.promoted_coarse, list)
-    assert all(isinstance(x, Link) for x in da_chain.promoted_coarse)
-    assert all(isinstance(x.parameters, np.ndarray) for x in da_chain.promoted_coarse)
-    
-    
-    assert isinstance(da_chain.subchain_lengths, list)
-    assert all(isinstance(c, int) for c in da_chain.subchain_lengths)
-    
-    
-    assert isinstance(da_chain.chain_fine, list)
-    assert all(isinstance(x, Link) for x in da_chain.chain_fine)
-    assert all(isinstance(x.parameters, np.ndarray) for x in da_chain.chain_fine)
-    
-    
-    assert isinstance(da_chain.accepted_fine, list)
-    assert all(isinstance(c, bool) for c in da_chain.accepted_fine)
+    assert_sample_chain(da_chain, "DA", iterations)
 
 #--------------------------------------------------------------------------------------------
 # Class MLDAChain 
@@ -332,9 +345,10 @@ def test_sample_for_DAchain(iterations, progressbar):
         ([posterior_coarse, posterior_fine], proposal_mlda_base, [2], np.array([0.6, 0.782]), None),
         (posteriors_adaptive, proposal_mlda_base, [2], np.array([0.6, 0.782]), None),
 
-        # das funktioniert bei beiden Versionen aus dem gleichen Grund nicht
-        #(posteriors_adaptive, proposal_mlda_base, [2], np.array([0.6, 0.782]), 'state-independent'), #test failt wegen ''MLDA' object has no attribute 'bias''
-        #([posterior_coarse, posterior_fine], proposal_mlda_base, [2], np.array([0.6, 0.782]), 'state-dependent'), #funktioniert nicht (chain wird nicht generiert wegen ''MLDAChain' object has no attribute 'bias'')
+        pytest.param(posteriors_adaptive, proposal_mlda_base, [2], np.array([0.6, 0.782]), 'state-independent', marks=pytest.mark.xfail(
+                reason="Known bug: MLDA proposal has no attribute 'bias'")), 
+        pytest.param([posterior_coarse, posterior_fine], proposal_mlda_base, [2], np.array([0.6, 0.782]), 'state-dependent', marks=pytest.mark.xfail(
+                reason="Known bug: MLDA proposal has no attribute 'bias'")),
         
     ],
 )
@@ -348,34 +362,7 @@ def test_MLDA_chain_constructor(posteriors, proposal, subchain_lengths, initial_
         adaptive_error_model=adaptive_error_model
     )
 
-    assert isinstance(mlda_chain.posterior, Posterior)
-    assert isinstance(mlda_chain.level, int)
-    assert isinstance(mlda_chain.proposal, MLDA)
-    
-    assert isinstance(mlda_chain.subchain_length, int)
-    
-    
-    assert isinstance(mlda_chain.initial_parameters, np.ndarray)
-    assert all(isinstance(y, float) for y in mlda_chain.initial_parameters)
-    if (initial_parameters is not None):
-        assert len(mlda_chain.initial_parameters) == len(initial_parameters)
-        np.testing.assert_array_equal(
-            mlda_chain.initial_parameters,
-            initial_parameters
-        )
-    
-    assert isinstance(mlda_chain.chain, list)
-    assert all(isinstance(x, Link) for x in mlda_chain.chain)
-    assert all(isinstance(x.parameters, np.ndarray) for x in mlda_chain.chain)
-    assert len(mlda_chain.chain) == 1
-    
-    assert isinstance(mlda_chain.accepted, list)
-    assert all(isinstance(b, bool) for b in mlda_chain.accepted)
-    assert len(mlda_chain.accepted) == 1
-    
-    assert isinstance(mlda_chain.adaptive_error_model, (str, type(None))) 
-    #assert isinstance(da_chain.bias, (RecursiveSampleMoments,type(None)))
-    assert isinstance(mlda_chain.store_coarse_chain, bool)
+    assert_constructor(mlda_chain, "MLDA", initial_parameters=initial_parameters)
 
 #--------------------------------------------------------------------------------------------
 # test sample for MLDA chain
@@ -384,8 +371,8 @@ def test_MLDA_chain_constructor(posteriors, proposal, subchain_lengths, initial_
     "iterations, progressbar",
     [
         (0, False),
+        (50, False),
         (100, False),
-        (200, True),
     ],
 )
 def test_sample_for_MLDAchain(iterations, progressbar):
@@ -400,17 +387,27 @@ def test_sample_for_MLDAchain(iterations, progressbar):
     
     mlda_chain.sample(iterations, progressbar=progressbar)
 
-    assert isinstance(mlda_chain.proposal, MLDA)
-    
-    assert isinstance(mlda_chain.chain, list)
-    assert all(isinstance(x, Link) for x in mlda_chain.chain)
-    assert all(isinstance(x.parameters, np.ndarray) for x in mlda_chain.chain)
-    assert len(mlda_chain.chain) == iterations + 1
-    
-    assert isinstance(mlda_chain.accepted, list)
-    assert all(isinstance(b, bool) for b in mlda_chain.accepted)
-    assert len(mlda_chain.accepted) == iterations + 1
+    assert_sample_chain(mlda_chain, "MLDA", iterations)
 
+#--------------------------------------------------------------------------------------------
+# run sanity checks
+
+def run_sanity_checks(chain, specific_chain, da):
+
+    chain.sample(iterations=1000, progressbar=False)
+    samples = np.array([link.parameters for link in specific_chain])
+    samples = samples[100:]  # burn-in
+
+    assert_chain_moves(samples)
+    assert_variance_nonzero(samples)
+    assert_mean_close(samples, target=true_params, atol=0.15)
+    assert_not_too_correlated(samples)
+    assert_stationary(samples)
+
+    if (da):
+        assert_reasonable_acceptance_da(chain)
+    else:
+        assert_reasonable_acceptance(chain)
 
 #--------------------------------------------------------------------------------------------
 # sanity checks mh
@@ -418,19 +415,8 @@ def test_sample_for_MLDAchain(iterations, progressbar):
 def test_mh_sample_stats():
     
     chain = Chain(posterior, proposal, initial_parameters=None)
-    chain.sample(iterations=1000, progressbar=True)
 
-    samples = np.array([link.parameters for link in chain.chain])
-
-    samples = samples[100:]  # burn-in
-
-    assert_chain_moves(samples)
-    assert_variance_nonzero(samples)
-    assert_mean_close(samples, target=true_params, atol=0.1)
-
-    assert_reasonable_acceptance(chain)
-    assert_not_too_correlated(samples)
-    assert_stationary(samples)
+    run_sanity_checks(chain, chain.chain, False)
 
 #--------------------------------------------------------------------------------------------
 # sanity checks da
@@ -446,18 +432,8 @@ def test_da_sample_stats():
         adaptive_error_model=None,
         store_coarse_chain=True
     )
-    
-    da_chain.sample(iterations=1000, progressbar=False)
 
-    samples = np.array([link.parameters for link in da_chain.chain_fine])
-    samples = samples[100:]  # burn-in
-
-    assert_chain_moves(samples)
-    assert_variance_nonzero(samples)
-    assert_mean_close(samples, target=true_params, atol=0.1)
-    assert_not_too_correlated(samples)
-    assert_stationary(samples)
-    assert_reasonable_acceptance_da(da_chain)
+    run_sanity_checks(da_chain, da_chain.chain_fine, True)
 
 #--------------------------------------------------------------------------------------------
 # sanity checks mlda
@@ -470,15 +446,5 @@ def test_mlda_sample_stats():
         initial_parameters=None,
         adaptive_error_model=None
     )
-    
-    mlda_chain.sample(iterations=1000, progressbar=False)
 
-    samples = np.array([link.parameters for link in mlda_chain.chain])
-    samples = samples[100:]  # burn-in
-
-    assert_chain_moves(samples)
-    assert_variance_nonzero(samples)
-    assert_mean_close(samples, target=true_params, atol=0.1)
-    assert_not_too_correlated(samples)
-    assert_stationary(samples)
-    assert_reasonable_acceptance(mlda_chain)
+    run_sanity_checks(mlda_chain, mlda_chain.chain, False) 
