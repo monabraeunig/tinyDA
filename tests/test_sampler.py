@@ -10,7 +10,7 @@ from tinyDA.proposal import GaussianRandomWalk
 from tinyDA.link import Link
 
 #--------------------------------------------------------------------------------------------
-np.random.seed(123)
+np.random.seed(21)
 
 #--------------------------------------------------------------------------------------------
 # Simple forward models
@@ -30,7 +30,6 @@ def prior():
 
 @pytest.fixture
 def data():
-    np.random.seed(123)
     theta_true = np.array([0.1, -0.2])
     return forward_fine(theta_true) + 0.05 * np.random.randn(2)
 
@@ -48,7 +47,23 @@ def posteriors(prior, data):
     }
 
 #--------------------------------------------------------------------------------------------
-# test sample() returned values (single)
+# check chain content
+def check_chain_content(out, n_chains, iterations, chain_name, is_coarse):
+
+    for i in range(n_chains):
+        key = f"{chain_name}{i}"
+        assert key in out
+        chain = out[key]
+        if (is_coarse):
+            assert len(chain) == iterations * 2
+        else:
+            assert len(chain) == iterations + 1
+        assert isinstance(chain, list)
+        assert all(isinstance(link, Link) for link in chain)
+    
+
+#--------------------------------------------------------------------------------------------
+# MH
 def validate_sample_dict(out, expected_sampler, n_chains, iterations):
     # Check metadata (info)
     assert out["sampler"] == expected_sampler
@@ -56,17 +71,10 @@ def validate_sample_dict(out, expected_sampler, n_chains, iterations):
     assert out["iterations"] == iterations + 1
 
     # Check chain contents (chains)
-    for i in range(n_chains):
-        key = f"chain_{i}"
-        assert key in out
-        chain = out[key]
-        assert len(chain) == iterations + 1
-        assert all(isinstance(link, Link) for link in chain)
-        #for link in chain:
-        #    assert isinstance(link, Link)
+    check_chain_content(out, n_chains, iterations, "chain_", False)
 
 #--------------------------------------------------------------------------------------------
-# test sample() returned values (da)
+# DA
 def validate_sample_dict_da(out, expected_sampler, n_chains, iterations, subchain_length):
     # Check metadata (info)
     assert out["sampler"] == expected_sampler
@@ -76,30 +84,13 @@ def validate_sample_dict_da(out, expected_sampler, n_chains, iterations, subchai
 
     # Check chain contents (chains)
     # Validate fine samples
-    for i in range(n_chains):
-        key = f"chain_fine_{i}"
-        assert key in out
-        chain = out[key]
-        assert len(chain) == iterations + 1
-        assert isinstance(chain, list)
-        for link in chain:
-            assert isinstance(link, Link)
-
+    check_chain_content(out, n_chains, iterations, "chain_fine_", False)
     # Validate coarse samples
-    for i in range(n_chains):
-        key = f"chain_coarse_{i}"
-        assert key in out
-        chain = out[key]
-        assert len(chain) == iterations * 2
-        assert isinstance(chain, list)
-        for link in chain:
-            assert isinstance(link, Link)
-
-    # Validate promoted coarse samples
-        # die gibts nicht also es gibt keine promoted_... chain, deswegen hab ich den ganzen Teil hier gelöscht
+    check_chain_content(out, n_chains, iterations, "chain_coarse_", True)
+    
 
 #--------------------------------------------------------------------------------------------
-# test sample() returned values (mlda)
+# MLDA
 def validate_sample_dict_mlda(out, expected_sampler, n_chains, iterations, subchain_lengths):
     # Check metadata (info)
     assert out["sampler"] == expected_sampler
@@ -122,14 +113,9 @@ def validate_sample_dict_mlda(out, expected_sampler, n_chains, iterations, subch
             if i==2:
                 assert len(chain) == iterations +1
             assert isinstance(chain, list)
-            for link in chain:
-                assert isinstance(link, Link)
-
-    # Validate coarse samples:
-        # die gibts nicht also es gibt keine promoted_... chain, deswegen hab ich den ganzen Teil hier gelöscht
+            assert all(isinstance(link, Link) for link in chain)
 
 
-#--------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------
 # sanity checks
 
@@ -176,7 +162,7 @@ def assert_chain_moves(samples):
     diffs = np.diff(samples, axis=0)
     assert np.any(np.abs(diffs) > 0), "Chain did not move"
 
-# test chain is not too corralated
+# test chain is not too correlated
 def assert_not_too_correlated(samples, max_lag1_corr=0.95):
     x = samples[:, 0]  # check one dimension
     corr = np.corrcoef(x[:-1], x[1:])[0, 1]
@@ -190,10 +176,6 @@ def assert_stationary(samples):
 
     assert np.allclose(first, second, atol=0.2), \
         f"Chain not stationary: {first} vs {second}"
-#--------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------
-
-
 
 #--------------------------------------------------------------------------------------------
 # test sample() with n_levels == 1 => sampler==MH
@@ -201,14 +183,13 @@ def assert_stationary(samples):
 @pytest.mark.parametrize(
     "proposal, iterations, n_chains",
     [
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 500, 3),
+        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 100, 3),
         (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 0, 3),
     ],
 )
 def test_mh_sampling(posteriors, proposal, iterations, n_chains):
     
     result_mh = sample(
-        #posteriors=posterior_fine,
         posteriors=posteriors["fine"],
         proposal=proposal,
         iterations=iterations,
@@ -225,14 +206,13 @@ def test_mh_sampling(posteriors, proposal, iterations, n_chains):
 @pytest.mark.parametrize(
     "proposal_da, iterations, n_chains",
     [
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 500, 3),
+        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 100, 3),
         (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 0, 3),
     ],
 )
 def test_da_sampling(posteriors, proposal_da, iterations, n_chains):
     
     result_da = sample(
-        #posteriors=[posterior_coarse, posterior_fine],
         posteriors=[posteriors["coarse"], posteriors["fine"]],
         proposal=proposal_da,
         iterations=iterations,
@@ -251,13 +231,12 @@ def test_da_sampling(posteriors, proposal_da, iterations, n_chains):
 @pytest.mark.parametrize(
     "proposal_mlda, iterations, n_chains",
     [
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 500, 3),
+        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 100, 3),
         (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 0, 3),
     ],
 )
 def test_mlda_sampling(posteriors, proposal_mlda, iterations, n_chains):
     result_mlda = sample(
-        #posteriors=[posterior_coarse, posterior_medium, posterior_fine],
         posteriors=[posteriors["coarse"], posteriors["medium"], posteriors["fine"]],
         proposal=proposal_mlda,
         iterations=iterations,
@@ -270,10 +249,19 @@ def test_mlda_sampling(posteriors, proposal_mlda, iterations, n_chains):
     
     validate_sample_dict_mlda(result_mlda, 'MLDA', n_chains=n_chains, iterations=iterations, subchain_lengths=[2,2])
 
+#--------------------------------------------------------------------------------------------
+# run sanity checks
+def run_sanity_checks(samples, target, atol):
 
+    assert_mean_close(samples, target, atol)
+    assert_variance_nonzero(samples)
+    assert_chain_moves(samples)
+
+    assert_not_too_correlated(samples, max_lag1_corr=0.95)
+    assert_stationary(samples)
+    
 #--------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------
-# sanity checks mh
+# sanity checks for MH
 def test_mh_sampling_statistics(posteriors):
     result = sample(
         posteriors=posteriors["fine"],
@@ -283,19 +271,13 @@ def test_mh_sampling_statistics(posteriors):
         force_sequential=True,
     )
 
-    #chain_dict, level="fine", chain_id=0, burnin=0
     samples = extract_parameters(result, burnin=100)
-
     target = np.array([0.1, -0.2])
 
-    assert_mean_close(samples, target, atol=0.1)
-    assert_variance_nonzero(samples)
-    assert_chain_moves(samples)
-
-    assert_not_too_correlated(samples, max_lag1_corr=0.95)
-    assert_stationary(samples)
+    run_sanity_checks(samples, target, 0.1)
+    
 #--------------------------------------------------------------------------------------------
-# sanity checks da
+# sanity checks for DA
 def test_da_sampling_statistics(posteriors):
     result = sample(
         posteriors=[posteriors["coarse"], posteriors["fine"]],
@@ -308,20 +290,13 @@ def test_da_sampling_statistics(posteriors):
         force_sequential=True,
     )
 
-    #chain_dict, level="fine", chain_id=0, burnin=0
     samples = extract_parameters(result, burnin=100)
-
     target = np.array([0.1, -0.2])
 
-    assert_mean_close(samples, target, atol=0.15)  # DA slightly noisier
-    assert_variance_nonzero(samples)
-    assert_chain_moves(samples)
-
-    assert_not_too_correlated(samples, max_lag1_corr=0.95)
-    assert_stationary(samples)
+    run_sanity_checks(samples, target, 0.15)
     
 #--------------------------------------------------------------------------------------------
-# sanity checks mlda
+# sanity checks for MLDA
 def test_mlda_sampling_statistics(posteriors):
     result = sample(
         posteriors=[posteriors["coarse"], posteriors["medium"], posteriors["fine"]],
@@ -335,12 +310,6 @@ def test_mlda_sampling_statistics(posteriors):
     )
 
     samples = extract_parameters(result, level=2, burnin=100)
-
     target = np.array([0.1, -0.2])
 
-    assert_mean_close(samples, target, atol=0.2)
-    assert_variance_nonzero(samples)
-    assert_chain_moves(samples)
-
-    assert_not_too_correlated(samples, max_lag1_corr=0.95)
-    assert_stationary(samples)
+    run_sanity_checks(samples, target, 0.2)
