@@ -19,7 +19,7 @@ import arviz as az
 import xarray as xr
 
 #--------------------------------------------------------------------------------------------
-np.random.seed(42)
+np.random.seed(21)
 
 #--------------------------------------------------------------------------------------------
 # Forward models
@@ -39,7 +39,6 @@ def prior():
 
 @pytest.fixture(scope="session")
 def data():
-    np.random.seed(42)
     theta_true = np.array([0.1, -0.2])
     return forward_fine(theta_true) + 0.05 * np.random.randn(2)
 
@@ -60,18 +59,19 @@ def proposal():
     return GaussianRandomWalk(C=np.eye(2)*0.05, adaptive=False)
 
 #--------------------------------------------------------------------------------------------
-iterations = 500
-n_chains = 1
-subchain_length = 2
-subchain_lengths = [2,2]
+ITERATIONS = 500
+N_CHAINS = 1
+SUBCHAIN_LENGTH = 2
+SUBCHAIN_LENGTHS = [2,2]
+
 # MH
 @pytest.fixture(scope="session")
 def mh_chain(posteriors, proposal):
     return sample(
         posteriors=posteriors["fine"],
         proposal=proposal,
-        iterations=iterations,
-        n_chains=n_chains,
+        iterations=ITERATIONS,
+        n_chains=N_CHAINS,
         force_sequential=True,
     )
 
@@ -81,9 +81,9 @@ def da_chain(posteriors, proposal):
     return sample(
         posteriors=[posteriors["coarse"], posteriors["fine"]],
         proposal=proposal,
-        iterations=iterations,
-        n_chains=n_chains,
-        subchain_length=subchain_length,
+        iterations=ITERATIONS,
+        n_chains=N_CHAINS,
+        subchain_length=SUBCHAIN_LENGTH,
         randomize_subchain_length=False,
         store_coarse_chain=True,
         force_sequential=True,
@@ -95,9 +95,9 @@ def mlda_chain(posteriors, proposal):
     return sample(
         posteriors=[posteriors["coarse"], posteriors["medium"], posteriors["fine"]],
         proposal=proposal,
-        iterations=iterations,
-        n_chains=n_chains,
-        subchain_length=subchain_lengths,
+        iterations=ITERATIONS,
+        n_chains=N_CHAINS,
+        subchain_length=SUBCHAIN_LENGTHS,
         randomize_subchain_length=False,
         store_coarse_chain=True,
         force_sequential=True,
@@ -108,113 +108,184 @@ def samples_mh(mh_chain):
     return get_samples(mh_chain, attribute="parameters")
 
 @pytest.fixture(scope="session")
-def samples_da_coarse(da_chain):
+def samples_da_fine(da_chain):
     return get_samples(da_chain, attribute="parameters", level="fine")
+
+@pytest.fixture(scope="session")
+def samples_da_coarse(da_chain):
+    return get_samples(da_chain, attribute="parameters", level="coarse")
+
+
 
 @pytest.fixture(scope="session")
 def samples_mlda_level0(mlda_chain): 
     return get_samples(mlda_chain, attribute="parameters", level=2)
+    
 #--------------------------------------------------------------------------------------------
 # test get_samples()
 
-@pytest.mark.parametrize(
-    "chain_name, attribute, level, burnin",
-    [
-        # MH
-        ("mh_chain", "parameters", "fine", 0),
-        ("mh_chain", "model_output", "fine", 0),
-        # qoi hat die chain dim 1 und alle einträge sind none
-        ("mh_chain", "qoi", "fine", 0),  
-        ("mh_chain", "stats", "fine", 0),
+def assert_get_samples(chain_name, level, chain_samples, dim):
 
-        #DA
-        ("da_chain", "parameters", "fine", 0),
-        ("da_chain", "model_output", "fine", 0),
-        ("da_chain", "qoi", "fine", 0),
-        ("da_chain", "stats", "fine", 0),
-
-        ("da_chain", "parameters", "coarse", 0),
-        ("da_chain", "model_output", "coarse", 0),
-        ("da_chain", "qoi", "coarse", 0),
-        ("da_chain", "stats", "coarse", 0),
-
-        #MLDA
-        ("mlda_chain", "parameters", 2, 0),
-        ("mlda_chain", "model_output", 2, 0),
-        ("mlda_chain", "qoi", 2, 0),
-        ("mlda_chain", "stats", 2, 0),
-
-        ("mlda_chain", "parameters", 1, 0),
-        ("mlda_chain", "model_output", 1, 0),
-        ("mlda_chain", "qoi", 1, 0),
-        ("mlda_chain", "stats", 1, 0),
-
-        ("mlda_chain", "parameters", 0, 0),
-        ("mlda_chain", "model_output", 0, 0),
-        ("mlda_chain", "qoi", 0, 0),
-        ("mlda_chain", "stats", 0, 0),
-    ],
-)
-def test_get_samples(request, chain_name, attribute, level, burnin):
-    
-    chain = request.getfixturevalue(chain_name)
-    chain_samples = get_samples(chain=chain, attribute=attribute, level=level, burnin=burnin)
     # Test output 
     assert isinstance(chain_samples, dict)
     assert isinstance(chain_samples['chain_0'], np.ndarray)
     
     if (chain_name == "mh_chain"):
         assert chain_samples["sampler"] == "MH"
+            
+    elif (chain_name == "da_chain"):
+        assert chain_samples["sampler"] == "DA"
+        assert chain_samples["subchain_length"] == SUBCHAIN_LENGTH
+            
+    elif(chain_name == "mlda_chain"):
+        assert chain_samples["sampler"] == "MLDA"
+        assert chain_samples["subchain_lengths"] == SUBCHAIN_LENGTHS
+        
+    assert chain_samples["n_chains"] == N_CHAINS
+
+    if (level == "fine" or level == 2):
+        assert chain_samples["iterations"] == ITERATIONS + 1
+    elif (level == "coarse" or level == 1):
+        assert chain_samples["iterations"] == ITERATIONS * 2
+    elif (level == 0):
+        assert chain_samples["iterations"] == ITERATIONS * 4
+
+    assert chain_samples["dimension"] == dim
+
+
+#--------------------------------------------------------------------------------------------
+# test get_samples() parameters
+
+@pytest.mark.parametrize(
+    "chain_name, attribute, level, burnin",
+    [
+        # MH
+        ("mh_chain", "parameters", "fine", 0),
+
+        #DA
+        ("da_chain", "parameters", "fine", 0),
+        ("da_chain", "parameters", "coarse", 0),
+
+        #MLDA
+        ("mlda_chain", "parameters", 2, 0),
+        ("mlda_chain", "parameters", 1, 0),
+        ("mlda_chain", "parameters", 0, 0),
+    ],
+)
+
+def test_get_samples_parameters(request, chain_name, attribute, level, burnin):
+
+    chain = request.getfixturevalue(chain_name)
+    chain_samples = get_samples(chain=chain, attribute=attribute, level=level, burnin=burnin)
+
+    assert_get_samples(chain_name, level, chain_samples, 2)
+    
+    if (chain_name == "mh_chain"):
         # does get_samples get the correct parameters
         if (attribute == "parameters"):
             raw = np.array([link.parameters for link in chain["chain_0"]])
             assert np.allclose(chain_samples["chain_0"], raw)
             
     elif (chain_name == "da_chain"):
-        assert chain_samples["sampler"] == "DA"
-        assert chain_samples["subchain_length"] == subchain_length
         # does get_samples get the correct parameters
-        if (attribute == "parameters"):
-            if level == "fine":
-                raw_chain = chain["chain_fine_0"]
-            elif level == "coarse":
-                raw_chain = chain["chain_coarse_0"]
+        if level == "fine":
+            raw_chain = chain["chain_fine_0"]
+        elif level == "coarse":
+            raw_chain = chain["chain_coarse_0"]
                 
-            raw = np.array([link.parameters for link in raw_chain])
-            assert np.allclose(chain_samples["chain_0"], raw)
+        raw = np.array([link.parameters for link in raw_chain])
+        assert np.allclose(chain_samples["chain_0"], raw)
             
     elif(chain_name == "mlda_chain"):
-        assert chain_samples["sampler"] == "MLDA"
-        assert chain_samples["subchain_lengths"] == subchain_lengths
         # does get_samples get the correct parameters
-        if (attribute == "parameters"):
-            if (level == 0):
-                raw_chain = chain["chain_l0_0"]
-            elif (level == 1):
-                raw_chain = chain["chain_l1_0"]
-            elif (level == 2):
-                raw_chain = chain["chain_l2_0"]
+        if (level == 0):
+            raw_chain = chain["chain_l0_0"]
+        elif (level == 1):
+            raw_chain = chain["chain_l1_0"]
+        elif (level == 2):
+            raw_chain = chain["chain_l2_0"]
     
-            raw = np.array([link.parameters for link in raw_chain])
-            assert np.allclose(chain_samples["chain_0"], raw)
+        raw = np.array([link.parameters for link in raw_chain])
+        assert np.allclose(chain_samples["chain_0"], raw)
+
+#--------------------------------------------------------------------------------------------
+# test get_samples() model_output
+
+@pytest.mark.parametrize(
+    "chain_name, attribute, level, burnin",
+    [
+        # MH
+        ("mh_chain", "model_output", "fine", 0),
+
+        #DA
+        ("da_chain", "model_output", "fine", 0),
+        ("da_chain", "model_output", "coarse", 0),
         
-    assert chain_samples["n_chains"] == n_chains
+        #MLDA
+        ("mlda_chain", "model_output", 2, 0),
+        ("mlda_chain", "model_output", 1, 0),
+        ("mlda_chain", "model_output", 0, 0),
+    ],
+)
+def test_get_samples_model_output(request, chain_name, attribute, level, burnin):
 
-    if (level == "fine" or level == 2):
-        assert chain_samples["iterations"] == iterations + 1
-    elif (level == "coarse" or level == 1):
-        assert chain_samples["iterations"] == iterations * 2
-    elif (level == 0):
-        assert chain_samples["iterations"] == iterations * 4
+    chain = request.getfixturevalue(chain_name)
+    chain_samples = get_samples(chain=chain, attribute=attribute, level=level, burnin=burnin)
     
-    if (attribute == "parameters" or attribute == "model_output"):
-        assert chain_samples["dimension"] == 2
-    elif (attribute == "qoi"):
-        assert chain_samples["dimension"] == 1
-    elif (attribute == "stats"):
-        assert chain_samples["dimension"] == 3
+    assert_get_samples(chain_name, level, chain_samples, 2)
 
+#--------------------------------------------------------------------------------------------
+# test get_samples() qoi
 
+@pytest.mark.parametrize(
+    "chain_name, attribute, level, burnin",
+    [
+        # MH
+        # qoi hat die chain dim 1 und alle einträge sind none
+        ("mh_chain", "qoi", "fine", 0),  
+        
+        #DA
+        ("da_chain", "qoi", "fine", 0),
+        ("da_chain", "qoi", "coarse", 0),
+    
+        #MLDA
+        ("mlda_chain", "qoi", 2, 0),
+        ("mlda_chain", "qoi", 1, 0),
+        ("mlda_chain", "qoi", 0, 0),
+    ],
+)
+def test_get_samples_qoi(request, chain_name, attribute, level, burnin):
+
+    chain = request.getfixturevalue(chain_name)
+    chain_samples = get_samples(chain=chain, attribute=attribute, level=level, burnin=burnin)
+    
+    assert_get_samples(chain_name, level, chain_samples, 1)
+
+#--------------------------------------------------------------------------------------------
+# test get_samples() stats
+
+@pytest.mark.parametrize(
+    "chain_name, attribute, level, burnin",
+    [
+        # MH
+        ("mh_chain", "stats", "fine", 0),
+
+        #DA
+        ("da_chain", "stats", "fine", 0),
+        ("da_chain", "stats", "coarse", 0),
+
+        #MLDA
+        ("mlda_chain", "stats", 2, 0),
+        ("mlda_chain", "stats", 1, 0),
+        ("mlda_chain", "stats", 0, 0),
+    ],
+)
+def test_get_samples_stats(request, chain_name, attribute, level, burnin):
+
+    chain = request.getfixturevalue(chain_name)
+    chain_samples = get_samples(chain=chain, attribute=attribute, level=level, burnin=burnin)
+    
+    assert_get_samples(chain_name, level, chain_samples, 3)
 
 
 #--------------------------------------------------------------------------------------------
@@ -224,6 +295,7 @@ def test_get_samples(request, chain_name, attribute, level, burnin):
     "samples_name, keys",
     [
         ("samples_mh", ["x0","x1"]),
+        ("samples_da_fine", ["x0","x1"]),
         ("samples_da_coarse", ["x0","x1"]),
         ("samples_mlda_level0", ["x0","x1"]),
     ],
@@ -239,19 +311,19 @@ def test_to_xarray(request, samples_name, keys):
 
     original = samples["chain_0"]
 
-    # test value concistency 
+    # test value consistency
     assert np.allclose(xarr["x0"].values[0], original[:, 0])
     assert np.allclose(xarr["x1"].values[0], original[:, 1])
     
     if (samples.get("level") in (None, "fine", 2)):
-        assert xarr["x0"].shape == (1, iterations + 1)
-        assert xarr["x1"].shape == (1, iterations + 1)
-    elif (samples["level"] == "corase" or samples["level"] == 1):
-        assert xarr["x0"].shape == (1, iterations * 2)
-        assert xarr["x1"].shape == (1, iterations * 2)
+        assert xarr["x0"].shape == (1, ITERATIONS + 1)
+        assert xarr["x1"].shape == (1, ITERATIONS + 1)
+    elif (samples["level"] == "coarse" or samples["level"] == 1):
+        assert xarr["x0"].shape == (1, ITERATIONS * 2)
+        assert xarr["x1"].shape == (1, ITERATIONS * 2)
     elif (samples["level"] == 0):
-        assert xarr["x0"].shape == (1, iterations * 4)
-        assert xarr["x1"].shape == (1, iterations * 4)
+        assert xarr["x0"].shape == (1, ITERATIONS * 4)
+        assert xarr["x1"].shape == (1, ITERATIONS * 4)
 
 #--------------------------------------------------------------------------------------------
 # Test to_inference_data()
@@ -290,20 +362,3 @@ def test_to_inference_data(request, chain_name, level, burnin, parameter_names):
     # test values consistency
     samples = get_samples(chain, "parameters", level=level)
     assert np.allclose(idata.posterior["x0"].values[0], samples["chain_0"][:, 0])
-
-    # ich weiß nicht genau was ich mit qoi machen soll weil das ist immer none
-
-#--------------------------------------------------------------------------------------------
-# Test get_twolevel_inference_data
-    # gibts nicht
-
-
-            
-#--------------------------------------------------------------------------------------------
-# Test get_promoted_samples
-    # gibts nicht
-
-
-#--------------------------------------------------------------------------------------------
-# test get_multilevel_inference_data
-    # gibts nicht
