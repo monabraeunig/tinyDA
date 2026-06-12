@@ -9,24 +9,29 @@ from tinyDA.distributions import DefaultGaussianLogLike
 from tinyDA.proposal import GaussianRandomWalk
 from tinyDA.link import Link
 
-#--------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------
 np.random.seed(21)
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # Simple forward models
 def forward_fine(theta):
     return np.array(theta)
 
+
 def forward_medium(theta):
     return 0.95 * np.array(theta)
+
 
 def forward_coarse(theta):
     return 0.9 * np.array(theta)
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 @pytest.fixture
 def prior():
     return multivariate_normal(mean=np.zeros(2), cov=np.eye(2))
+
 
 @pytest.fixture
 def data():
@@ -46,7 +51,8 @@ def posteriors(prior, data):
         "coarse": Posterior(prior, lik_coarse, model=forward_coarse),
     }
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # check chain content
 def check_chain_content(out, n_chains, iterations, chain_name, is_coarse):
 
@@ -54,15 +60,15 @@ def check_chain_content(out, n_chains, iterations, chain_name, is_coarse):
         key = f"{chain_name}{i}"
         assert key in out
         chain = out[key]
-        if (is_coarse):
+        if is_coarse:
             assert len(chain) == iterations * 2
         else:
             assert len(chain) == iterations + 1
         assert isinstance(chain, list)
         assert all(isinstance(link, Link) for link in chain)
-    
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # MH
 def validate_sample_dict(out, expected_sampler, n_chains, iterations):
     # Check metadata (info)
@@ -73,9 +79,12 @@ def validate_sample_dict(out, expected_sampler, n_chains, iterations):
     # Check chain contents (chains)
     check_chain_content(out, n_chains, iterations, "chain_", False)
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # DA
-def validate_sample_dict_da(out, expected_sampler, n_chains, iterations, subchain_length):
+def validate_sample_dict_da(
+    out, expected_sampler, n_chains, iterations, subchain_length
+):
     # Check metadata (info)
     assert out["sampler"] == expected_sampler
     assert out["n_chains"] == n_chains
@@ -87,16 +96,18 @@ def validate_sample_dict_da(out, expected_sampler, n_chains, iterations, subchai
     check_chain_content(out, n_chains, iterations, "chain_fine_", False)
     # Validate coarse samples
     check_chain_content(out, n_chains, iterations, "chain_coarse_", True)
-    
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # MLDA
-def validate_sample_dict_mlda(out, expected_sampler, n_chains, iterations, subchain_lengths):
+def validate_sample_dict_mlda(
+    out, expected_sampler, n_chains, iterations, subchain_lengths
+):
     # Check metadata (info)
     assert out["sampler"] == expected_sampler
     assert out["n_chains"] == n_chains
     assert out["iterations"] == iterations + 1
-    #assert out["levels"] == levels
+    # assert out["levels"] == levels
     assert out["subchain_lengths"] == subchain_lengths
 
     # Check chain contents (chains)
@@ -106,22 +117,23 @@ def validate_sample_dict_mlda(out, expected_sampler, n_chains, iterations, subch
             key = f"chain_l{i}_{j}"
             assert key in out
             chain = out[key]
-            if i==0:
+            if i == 0:
                 assert len(chain) == iterations * 4
-            if i==1:
+            if i == 1:
                 assert len(chain) == iterations * 2
-            if i==2:
-                assert len(chain) == iterations +1
+            if i == 2:
+                assert len(chain) == iterations + 1
             assert isinstance(chain, list)
             assert all(isinstance(link, Link) for link in chain)
 
 
-#--------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------
 # sanity checks
+
 
 def extract_parameters(chain_dict, level="fine", chain_id=0, burnin=0):
     sampler = chain_dict["sampler"]
-    
+
     if sampler == "MH":
         key = f"chain_{chain_id}"
 
@@ -148,19 +160,22 @@ def extract_parameters(chain_dict, level="fine", chain_id=0, burnin=0):
 
     chain = chain_dict[key][burnin:]
     return np.array([link.parameters for link in chain])
-        
+
 
 def assert_mean_close(samples, target, atol=0.1):
     mean = samples.mean(axis=0)
     assert np.allclose(mean, target, atol=atol), f"Mean {mean} not close to {target}"
 
+
 def assert_variance_nonzero(samples, min_std=1e-3):
     std = samples.std(axis=0)
     assert np.all(std > min_std), f"Std too small: {std}"
 
+
 def assert_chain_moves(samples):
     diffs = np.diff(samples, axis=0)
     assert np.any(np.abs(diffs) > 0), "Chain did not move"
+
 
 # test chain is not too correlated
 def assert_not_too_correlated(samples, max_lag1_corr=0.95):
@@ -168,50 +183,55 @@ def assert_not_too_correlated(samples, max_lag1_corr=0.95):
     corr = np.corrcoef(x[:-1], x[1:])[0, 1]
     assert abs(corr) < max_lag1_corr, f"Too correlated: {corr}"
 
+
 # compare early and late samples
 def assert_stationary(samples):
     n = len(samples)
     first = samples[: n // 2].mean(axis=0)
     second = samples[n // 2 :].mean(axis=0)
 
-    assert np.allclose(first, second, atol=0.2), \
-        f"Chain not stationary: {first} vs {second}"
+    assert np.allclose(
+        first, second, atol=0.2
+    ), f"Chain not stationary: {first} vs {second}"
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # test sample() with n_levels == 1 => sampler==MH
+
 
 @pytest.mark.parametrize(
     "proposal, iterations, n_chains",
     [
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 100, 3),
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 0, 3),
+        (GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False), 100, 3),
+        (GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False), 0, 3),
     ],
 )
 def test_mh_sampling(posteriors, proposal, iterations, n_chains):
-    
+
     result_mh = sample(
         posteriors=posteriors["fine"],
         proposal=proposal,
         iterations=iterations,
         n_chains=n_chains,
-        force_sequential=True,     # ensure Ray is never used
+        force_sequential=True,  # ensure Ray is never used
     )
-    
-    
+
     validate_sample_dict(result_mh, "MH", n_chains=n_chains, iterations=iterations)
 
-#--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
 # test sample() with n_levels == 2 => sampler==DA
+
 
 @pytest.mark.parametrize(
     "proposal_da, iterations, n_chains",
     [
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 100, 3),
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 0, 3),
+        (GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False), 100, 3),
+        (GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False), 0, 3),
     ],
 )
 def test_da_sampling(posteriors, proposal_da, iterations, n_chains):
-    
+
     result_da = sample(
         posteriors=[posteriors["coarse"], posteriors["fine"]],
         proposal=proposal_da,
@@ -222,17 +242,21 @@ def test_da_sampling(posteriors, proposal_da, iterations, n_chains):
         force_sequential=True,
         store_coarse_chain=True,
     )
-    
-    validate_sample_dict_da(result_da, 'DA', n_chains=n_chains, iterations=iterations, subchain_length=2)
 
-#--------------------------------------------------------------------------------------------
+    validate_sample_dict_da(
+        result_da, "DA", n_chains=n_chains, iterations=iterations, subchain_length=2
+    )
+
+
+# --------------------------------------------------------------------------------------------
 # test sample() with n_levels == 3 => sampler==MLDA
+
 
 @pytest.mark.parametrize(
     "proposal_mlda, iterations, n_chains",
     [
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 100, 3),
-        (GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False), 0, 3),
+        (GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False), 100, 3),
+        (GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False), 0, 3),
     ],
 )
 def test_mlda_sampling(posteriors, proposal_mlda, iterations, n_chains):
@@ -241,15 +265,22 @@ def test_mlda_sampling(posteriors, proposal_mlda, iterations, n_chains):
         proposal=proposal_mlda,
         iterations=iterations,
         n_chains=n_chains,
-        subchain_length=[2,2],   # two corrections levels
+        subchain_length=[2, 2],  # two corrections levels
         randomize_subchain_length=False,
         store_coarse_chain=True,
         force_sequential=True,
     )
-    
-    validate_sample_dict_mlda(result_mlda, 'MLDA', n_chains=n_chains, iterations=iterations, subchain_lengths=[2,2])
 
-#--------------------------------------------------------------------------------------------
+    validate_sample_dict_mlda(
+        result_mlda,
+        "MLDA",
+        n_chains=n_chains,
+        iterations=iterations,
+        subchain_lengths=[2, 2],
+    )
+
+
+# --------------------------------------------------------------------------------------------
 # run sanity checks
 def run_sanity_checks(samples, target, atol):
 
@@ -259,13 +290,14 @@ def run_sanity_checks(samples, target, atol):
 
     assert_not_too_correlated(samples, max_lag1_corr=0.95)
     assert_stationary(samples)
-    
-#--------------------------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------------------------
 # sanity checks for MH
 def test_mh_sampling_statistics(posteriors):
     result = sample(
         posteriors=posteriors["fine"],
-        proposal=GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False),
+        proposal=GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False),
         iterations=1000,
         n_chains=1,
         force_sequential=True,
@@ -275,13 +307,14 @@ def test_mh_sampling_statistics(posteriors):
     target = np.array([0.1, -0.2])
 
     run_sanity_checks(samples, target, 0.1)
-    
-#--------------------------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------------------------
 # sanity checks for DA
 def test_da_sampling_statistics(posteriors):
     result = sample(
         posteriors=[posteriors["coarse"], posteriors["fine"]],
-        proposal=GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False),
+        proposal=GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False),
         iterations=500,
         n_chains=1,
         subchain_length=2,
@@ -294,13 +327,14 @@ def test_da_sampling_statistics(posteriors):
     target = np.array([0.1, -0.2])
 
     run_sanity_checks(samples, target, 0.15)
-    
-#--------------------------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------------------------
 # sanity checks for MLDA
 def test_mlda_sampling_statistics(posteriors):
     result = sample(
         posteriors=[posteriors["coarse"], posteriors["medium"], posteriors["fine"]],
-        proposal=GaussianRandomWalk(C=np.eye(2)*0.1, adaptive=False),
+        proposal=GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False),
         iterations=500,
         n_chains=1,
         subchain_length=[2, 2],
