@@ -26,6 +26,11 @@ def forward_model_coarse(theta):
     return 0.9 * np.array(theta)
 
 
+# Model for third layer
+def forward_model_layer3(theta):
+    return 0.8 * np.array(theta)
+
+
 # --------------------------------------------------------------------------------------------
 # Prior: 2D Gaussian N(0, I)
 prior_mu = np.zeros(2)
@@ -40,6 +45,7 @@ likelihood_coarse = DefaultGaussianLogLike(data, covariance=0.2 * np.eye(2))
 
 likelihood_adaptive = AdaptiveGaussianLogLike(data, covariance=0.05 * np.eye(2))
 likelihood_adaptive_coarse = AdaptiveGaussianLogLike(data, covariance=0.2 * np.eye(2))
+likelihood_adaptive_layer3 = AdaptiveGaussianLogLike(data, covariance=0.25 * np.eye(2))
 
 # Posterior object
 posterior = Posterior(prior, likelihood, model=forward_model)
@@ -51,7 +57,15 @@ posterior_adaptive_fine = Posterior(prior, likelihood_adaptive, model=forward_mo
 posterior_adaptive_coarse = Posterior(
     prior, likelihood_adaptive_coarse, model=forward_model_coarse
 )
+posterior_adaptive_layer3 = Posterior(
+    prior, likelihood_adaptive_layer3, model=forward_model_layer3
+)
 posteriors_adaptive = [posterior_adaptive_coarse, posterior_adaptive_fine]
+posteriors_adaptive_3layers = [
+    posterior_adaptive_layer3,
+    posterior_adaptive_coarse,
+    posterior_adaptive_fine,
+]
 
 proposal = GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False)
 proposal_da = GaussianRandomWalk(C=np.eye(2) * 0.1, adaptive=False)
@@ -178,6 +192,9 @@ def assert_constructor(chain, level, initial_parameters):
         assert isinstance(chain.adaptive_error_model, (str, type(None)))
         assert isinstance(chain.store_coarse_chain, bool)
 
+        if chain.adaptive_error_model:
+            assert hasattr(chain, "bias")
+
     # DA
     if level == "DA":
         assert isinstance(chain.posterior_coarse, Posterior)
@@ -197,41 +214,6 @@ def assert_constructor(chain, level, initial_parameters):
     if level == "MLDA":
         assert isinstance(chain.level, int)
         assert isinstance(chain.proposal, MLDA)
-
-
-# --------------------------------------------------------------------------------------------
-# test existence of attribute bias
-
-
-@pytest.mark.xfail(
-    strict=True, reason="Known bug: DAChain does not define 'bias' attribute"
-)
-def test_DA_chain_has_bias_attribute():
-
-    da_chain = DAChain(
-        posterior_coarse,
-        posterior_fine,
-        proposal_da,
-        subchain_length=2,
-    )
-
-    assert hasattr(da_chain, "bias")
-
-
-@pytest.mark.xfail(
-    strict=True, reason="Known bug: MLDAChain does not define 'bias' attribute"
-)
-def test_MLDA_chain_has_bias_attribute():
-
-    mlda_chain = MLDAChain(
-        posteriors,
-        proposal_mlda_base,
-        subchain_lengths=[2],
-        initial_parameters=None,
-        adaptive_error_model=None,
-    )
-
-    assert hasattr(mlda_chain, "bias")
 
 
 # --------------------------------------------------------------------------------------------
@@ -322,6 +304,26 @@ def test_sample_for_MHchain(iterations, progressbar):
             False,
         ),
         (posterior_coarse, posterior_fine, proposal_da, 2, True, None, None, True),
+        (
+            posterior_adaptive_coarse,
+            posterior_adaptive_fine,
+            proposal_da,
+            2,
+            False,
+            None,
+            "state-dependent",
+            False,
+        ),
+        (
+            posterior_adaptive_coarse,
+            posterior_adaptive_fine,
+            proposal_da,
+            2,
+            False,
+            np.array([0.6, 0.782]),
+            "state-independent",
+            False,
+        ),
     ],
 )
 def test_DA_chain_constructor(
@@ -394,26 +396,12 @@ def test_sample_for_DAchain(iterations, progressbar):
             np.array([0.6, 0.782]),
             None,
         ),
-        (posteriors_adaptive, proposal_mlda_base, [2], np.array([0.6, 0.782]), None),
-        pytest.param(
-            posteriors_adaptive,
+        (
+            posteriors_adaptive_3layers,
             proposal_mlda_base,
-            [2],
-            np.array([0.6, 0.782]),
+            [2, 2],
+            None,
             "state-independent",
-            marks=pytest.mark.xfail(
-                reason="Known bug: MLDA proposal has no attribute 'bias'"
-            ),
-        ),
-        pytest.param(
-            [posterior_coarse, posterior_fine],
-            proposal_mlda_base,
-            [2],
-            np.array([0.6, 0.782]),
-            "state-dependent",
-            marks=pytest.mark.xfail(
-                reason="Known bug: MLDA proposal has no attribute 'bias'"
-            ),
         ),
     ],
 )
@@ -522,4 +510,4 @@ def test_mlda_sample_stats():
         adaptive_error_model=None,
     )
 
-    run_sanity_checks(mlda_chain, mlda_chain.chain, False) 
+    run_sanity_checks(mlda_chain, mlda_chain.chain, False)
