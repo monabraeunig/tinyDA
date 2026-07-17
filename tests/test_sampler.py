@@ -162,7 +162,7 @@ def extract_parameters(chain_dict, level="fine", chain_id=0, burnin=0):
     return np.array([link.parameters for link in chain])
 
 
-def assert_mean_close(samples, target, atol=0.2):
+def assert_mean_close(samples, target, atol=0.1):
     mean = samples.mean(axis=0)
     assert np.allclose(mean, target, atol=atol), f"Mean {mean} not close to {target}"
 
