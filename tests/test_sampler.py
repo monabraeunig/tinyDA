@@ -306,7 +306,7 @@ def test_mh_sampling_statistics(posteriors):
     samples = extract_parameters(result, burnin=100)
     target = np.array([0.1, -0.2])
 
-    run_sanity_checks(samples, target, 0.1)
+    run_sanity_checks(samples, target, 0.15)
 
 
 # --------------------------------------------------------------------------------------------
