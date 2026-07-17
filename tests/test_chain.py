@@ -42,6 +42,7 @@ true_params = np.array([0.2, -0.3])
 data = forward_model(true_params) + 0.05 * np.random.randn(2)
 likelihood = DefaultGaussianLogLike(data, covariance=0.05 * np.eye(2))
 likelihood_coarse = DefaultGaussianLogLike(data, covariance=0.2 * np.eye(2))
+likelihood_layer3 = DefaultGaussianLogLike(data, covariance=0.25 * np.eye(2))
 
 likelihood_adaptive = AdaptiveGaussianLogLike(data, covariance=0.05 * np.eye(2))
 likelihood_adaptive_coarse = AdaptiveGaussianLogLike(data, covariance=0.2 * np.eye(2))
@@ -49,9 +50,11 @@ likelihood_adaptive_layer3 = AdaptiveGaussianLogLike(data, covariance=0.25 * np.
 
 # Posterior object
 posterior = Posterior(prior, likelihood, model=forward_model)
-posterior_coarse = Posterior(prior, likelihood_coarse, model=forward_model_coarse)
 posterior_fine = posterior
+posterior_coarse = Posterior(prior, likelihood_coarse, model=forward_model_coarse)
+posterior_layer3 = Posterior(prior, likelihood_layer3, model=forward_model_layer3)
 posteriors = [posterior_coarse, posterior_fine]
+posteriors3 = [posterior_layer3, posterior_coarse, posterior_fine]
 
 posterior_adaptive_fine = Posterior(prior, likelihood_adaptive, model=forward_model)
 posterior_adaptive_coarse = Posterior(
@@ -60,7 +63,6 @@ posterior_adaptive_coarse = Posterior(
 posterior_adaptive_layer3 = Posterior(
     prior, likelihood_adaptive_layer3, model=forward_model_layer3
 )
-posteriors_adaptive = [posterior_adaptive_coarse, posterior_adaptive_fine]
 posteriors_adaptive_3layers = [
     posterior_adaptive_layer3,
     posterior_adaptive_coarse,
@@ -388,11 +390,12 @@ def test_sample_for_DAchain(iterations, progressbar):
 @pytest.mark.parametrize(
     "posteriors, proposal, subchain_lengths, initial_parameters, adaptive_error_model",
     [
-        ([posterior_coarse, posterior_fine], proposal_mlda_base, [2], None, None),
+        #([posterior_coarse, posterior_fine], proposal_mlda_base, [2], None, None),
+        (posteriors3, proposal_mlda_base, [2, 2], None, None),
         (
-            [posterior_coarse, posterior_fine],
+            posteriors3,
             proposal_mlda_base,
-            [2],
+            [2, 2],
             np.array([0.6, 0.782]),
             None,
         ),
@@ -410,7 +413,7 @@ def test_MLDA_chain_constructor(
 ):
 
     mlda_chain = MLDAChain(
-        posteriors=posteriors,
+        posteriors=posteriors_adaptive_3layers,
         proposal=proposal,
         subchain_lengths=subchain_lengths,
         initial_parameters=initial_parameters,
@@ -435,9 +438,9 @@ def test_MLDA_chain_constructor(
 def test_sample_for_MLDAchain(iterations, progressbar):
 
     mlda_chain = MLDAChain(
-        posteriors=posteriors,
+        posteriors=posteriors3,
         proposal=proposal_mlda_base,
-        subchain_lengths=[2],
+        subchain_lengths=[2, 2],
         initial_parameters=np.array([0.6, 0.782]),
         adaptive_error_model=None,
     )
@@ -503,9 +506,9 @@ def test_da_sample_stats():
 def test_mlda_sample_stats():
 
     mlda_chain = MLDAChain(
-        posteriors=posteriors,
+        posteriors=posteriors3,
         proposal=proposal_mlda_base,
-        subchain_lengths=[2],
+        subchain_lengths=[2, 2],
         initial_parameters=None,
         adaptive_error_model=None,
     )
