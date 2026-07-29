@@ -114,8 +114,7 @@ class Chain:
                 self.chain.append(proposal_link)
                 self.accepted.append(True)
             else:
-                #self.chain.append(self.chain[-1])
-                self.chain.append(self.chain[0])
+                self.chain.append(self.chain[-1])
                 self.accepted.append(False)
 
             # adapt the proposal. if the proposal is set to non-adaptive,
