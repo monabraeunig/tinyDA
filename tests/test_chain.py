@@ -53,7 +53,6 @@ posterior = Posterior(prior, likelihood, model=forward_model)
 posterior_fine = posterior
 posterior_coarse = Posterior(prior, likelihood_coarse, model=forward_model_coarse)
 posterior_layer3 = Posterior(prior, likelihood_layer3, model=forward_model_layer3)
-posteriors = [posterior_coarse, posterior_fine]
 posteriors3 = [posterior_layer3, posterior_coarse, posterior_fine]
 
 posterior_adaptive_fine = Posterior(prior, likelihood_adaptive, model=forward_model)
