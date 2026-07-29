@@ -1,5 +1,4 @@
 # external imports
-
 from itertools import compress
 import numpy as np
 from tqdm import tqdm
